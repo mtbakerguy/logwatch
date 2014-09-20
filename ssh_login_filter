@@ -1,0 +1,49 @@
+ban_seconds = 600
+rule = 1000
+maxrule = 1999
+
+banned_addresses = {}
+
+function banIP(addr)
+    if(banned_addresses[addr] ~= nil) then return end
+    print(string.format("Banning %s at %s",addr,os.date()))
+    os.execute(string.format("/sbin/ipfw add %d deny tcp from %s to %s",
+                             rule,addr,getnicaddressbydest(addr)))
+    banned_addresses[addr] = {rule,os.time()}
+    rule = rule + 1
+
+    if(rule == maxrule) then
+        print("Maximum number of rules added; exiting...")
+        -- cleanup remaining ban rules
+        for k,v in pairs(banned_addresses) do
+            os.execute(string.format("/sbin/ipfw delete %d",v[1]))
+            banned_addresses[k] = nil
+        end
+        os.exit(1)
+    end
+end
+
+function filter_ssh_logins(text)
+   start,endm = string.find(text,"Failed password for invalid user .* from ")
+   if(start ~= nil) then
+       cut = string.sub(text,endm+1)
+       space = string.find(cut," ")
+       banIP(string.sub(cut,1,space))
+   end
+end
+
+-- walk banned_addresses and cleanup anything over ban_seconds
+function alarm_handler()
+   curtime = os.time()
+   for k,v in pairs(banned_addresses) do
+        if(curtime > (ban_seconds + v[2])) then
+            print(string.format("Unbanning %s(%d) at %s",k,v[1],os.date()))
+            os.execute(string.format("/sbin/ipfw delete %d",v[1]))
+            banned_addresses[k] = nil
+        end
+   end
+end
+
+files2watch = {
+  { "/var/log/secure.log", filter_ssh_logins },
+}
